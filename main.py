@@ -11,14 +11,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-PV_POWER = 2.5
-PV_EFFICIENCY = 0.2
+# stałe do obliczania energii wydzielanej przez panele
+PV_POWER = 2.5 # moc panelu [kWh]
+PV_EFFICIENCY = 0.2 # wydajność panelu
 
+# endpoint czysto dla deployu na render.com - bez niego nie ma root page
 @app.get("/")
 def read_root():
     return {"status": "ok"}
 
-def get_url(lat, lon):
+# zwraca URL do openmeteo API z parametrami potrzebnymi do wyświetlenia
+def get_url(lat, lon) -> str:
 	url_base = "https://api.open-meteo.com/v1/forecast?"
 	params = [f"latitude={lat}",
 		f"longitude={lon}",
@@ -32,10 +35,11 @@ def get_url(lat, lon):
 		"sunshine_duration",
 		"surface_pressure_mean"
 	]
-
 	return(url_base + "&".join(params) + ",".join(daily_params) + "&timezone=auto")
 
-def get_forecast_data(lat, lon):
+# obsługa błędów API - zwrócenie odpowiedniego HTTPException
+# jeśli nie pojawia się błąd, zwraca dane w formacie json
+def get_forecast_data(lat, lon) -> dict:
 	url = get_url(lat, lon)
 	try:
 		response = requests.get(url, timeout=5)
@@ -55,9 +59,9 @@ def get_forecast_data(lat, lon):
 
 	return data
 
-
+# zwraca dane pogodowe z dodanymi wartościami energii wygenerowanej przez panele pv
 @app.get("/forecast/daily")
-def get_forecast(lat: float = Query(...), lon: float = Query(...)):
+def get_forecast(lat: float = Query(...), lon: float = Query(...)) -> dict:
     if not is_valid_geolocation(lat, lon):
         raise HTTPException(status_code=400, detail="Niepoprawne dane, nie można pobrać prognozy")
     
@@ -68,8 +72,9 @@ def get_forecast(lat: float = Query(...), lon: float = Query(...)):
     
     return forecast_data
 
+# zwraca podstawowe dane pogodowe + średnie/skrajne wartości do podsumowania
 @app.get("/forecast/summary")
-def get_summary(lat: float = Query(...), lon: float = Query(...)):
+def get_summary(lat: float = Query(...), lon: float = Query(...)) -> dict:
     if not is_valid_geolocation(lat, lon):
         raise HTTPException(status_code=400, detail="Niepoprawne dane, nie można pobrać podsumowania")
     
@@ -82,23 +87,21 @@ def get_summary(lat: float = Query(...), lon: float = Query(...)):
     
     return forecast_data
 
-def is_valid_geolocation(lat, lon):
+# walidacja danych - kontrola typu (czy jest liczbą) i poprawności zakresu 
+def is_valid_geolocation(lat, lon) -> bool:
 	try:
 		lat = float(lat)
 		lon = float(lon)
 	except (ValueError, TypeError):
 		return False
 	return -90 <= lat <= 90 and -180 <= lon <= 180
-    
-def is_rainy_week(weather_codes):
-    i = 0
-    for wc in weather_codes:
-        if wc >= 51:
-            i += 1
-    return "z opadami" if i>=4 else "bez opadów"
 
-def get_pv_energy(sunshine_array):
-    pv_energy = []
-    for sd in sunshine_array:
-        pv_energy.append(PV_EFFICIENCY * PV_POWER * sd/3600)
-    return pv_energy
+# podsumowanie tygodnia (opadów) - jeśli >= 4 dni z opadami, to tydzień ma status "z opadami"
+def is_rainy_week(weather_codes) -> str:
+    rainy_days = sum(wc >= 51 for wc in weather_codes)
+    return "z opadami" if rainy_days >= 4 else "bez opadów"
+
+# obliczanie energii generowanej przez panele pv dla każdego dnia
+# zwraca listę wartości
+def get_pv_energy(sunshine_array: list[float]) -> list[float]:
+    return [PV_EFFICIENCY * PV_POWER * sd / 3600 for sd in sunshine_array]
