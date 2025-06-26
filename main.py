@@ -29,18 +29,33 @@ def get_url(lat, lon):
 		"surface_pressure_mean"
 	]
 
-	return(url_base + "&".join(params) + ",".join(daily_params))
+	return(url_base + "&".join(params) + ",".join(daily_params) + "&timezone=auto")
 
 def get_forecast_data(lat, lon):
 	url = get_url(lat, lon)
-	response = requests.get(url)
-	return response.json()
+	try:
+		response = requests.get(url, timeout=5)
+		response.raise_for_status()
+	except requests.exceptions.Timeout:
+		raise HTTPException(status_code=504, detail="API pogodowe nie odpowiada (timeout)")
+	except requests.exceptions.RequestException as e:
+		raise HTTPException(status_code=502, detail=f"Błąd połączenia z API: {e}")
+
+	try:
+		data = response.json()
+	except ValueError:
+		raise HTTPException(status_code=500, detail="Nieprawidłowy format danych z API")
+
+	if "daily" not in data:
+		raise HTTPException(status_code=500, detail="Brak danych pogodowych w odpowiedzi API")
+
+	return data
 
 
 @app.get("/forecast/daily")
 def get_forecast(lat: float = Query(...), lon: float = Query(...)):
     if not is_valid_geolocation(lat, lon):
-        raise HTTPException(status_code=400)
+        raise HTTPException(status_code=400, detail="Niepoprawne dane, nie można pobrać prognozy")
     
     forecast_data = get_forecast_data(lat, lon)
     energy = get_pv_energy(forecast_data["daily"]["sunshine_duration"])
@@ -52,7 +67,7 @@ def get_forecast(lat: float = Query(...), lon: float = Query(...)):
 @app.get("/forecast/summary")
 def get_summary(lat: float = Query(...), lon: float = Query(...)):
     if not is_valid_geolocation(lat, lon):
-        raise HTTPException(status_code=400)
+        raise HTTPException(status_code=400, detail="Niepoprawne dane, nie można pobrać podsumowania")
     
     forecast_data = get_forecast_data(lat, lon)
     forecast_data["weather_summary"] = is_rainy_week(forecast_data["daily"]["weather_code"])
@@ -69,7 +84,7 @@ def is_valid_geolocation(lat, lon):
 		lon = float(lon)
 	except (ValueError, TypeError):
 		return False
-	return lat in range(-90, 91) and lon in range(-180, 181)
+	return -90 <= lat <= 90 and -180 <= lon <= 180
     
 def is_rainy_week(weather_codes):
     i = 0
