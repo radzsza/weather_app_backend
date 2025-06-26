@@ -14,6 +14,10 @@ app.add_middleware(
 PV_POWER = 2.5
 PV_EFFICIENCY = 0.2
 
+@app.get("/")
+def read_root():
+    return {"status": "ok"}
+
 def get_url(lat, lon):
 	url_base = "https://api.open-meteo.com/v1/forecast?"
 	params = [f"latitude={lat}",
